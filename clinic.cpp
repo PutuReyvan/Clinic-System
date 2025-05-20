@@ -6,123 +6,217 @@
 
 #define TABLE_SIZE 100
 
-typedef struct user{
+typedef struct user
+{
     char username[20];
     char password[20];
     int role; // 0 = client, 1 = admin
     struct user *next;
 } User;
 
-typedef struct{
+typedef struct
+{
     User *table[TABLE_SIZE];
 } hash_table;
 
-int hash_function(const char *username){
+int hash_function(const char *username)
+{
     int hash = 0;
-    for (int i = 0; username[i]; i++){
+    for (int i = 0; username[i]; i++)
+    {
         hash = (hash * 31 + username[i]) % TABLE_SIZE;
     }
     return hash;
 }
 
-void insert_user(hash_table *ht, const char *username, const char *password, int role){
+void insert_user(hash_table *ht, const char *username, const char *password, int role)
+{
     int idx = hash_function(username);
-    User *u = (User*)malloc(sizeof(User));
-    
-    if (!u){
+    User *u = (User *)malloc(sizeof(User));
+
+    if (!u)
+    {
         puts("Memory allocation failed");
         return;
     }
 
     strncpy(u->username, username, sizeof(u->username) - 1);
+    u->username[sizeof(u->username) - 1] = '\0';
     strncpy(u->password, password, sizeof(u->password) - 1);
+    u->password[sizeof(u->password) - 1] = '\0';
 
     u->role = role;
     u->next = ht->table[idx];
     ht->table[idx] = u;
 }
 
-User *find_user(hash_table *ht, const char *username){
+User *find_user(hash_table *ht, const char *username)
+{
     int idx = hash_function(username);
-
-    for (User *cur = ht->table[idx]; cur; cur = cur->next){
-        if (strcmp(cur->username, username) == 0) return cur;
+    for (User *cur = ht->table[idx]; cur; cur = cur->next)
+    {
+        if (strcmp(cur->username, username) == 0)
+            return cur;
     }
-
     return NULL;
 }
 
-// simple cross-platform pause
-void pause_console(void){
+void pause_console(void)
+{
     printf("Press any key to continue...");
     _getch();
     printf("\n");
 }
-// stub admin menu
-void admin_menu(void){
+
+void view_all_users(hash_table *ht)
+{
+    puts("=== List of Users ===");
+    for (int i = 0; i < TABLE_SIZE; i++)
+    {
+        User *cur = ht->table[i];
+        while (cur)
+        {
+            printf("Username: %s | Role: %s\n", cur->username, cur->role == 1 ? "Admin" : "Client");
+            cur = cur->next;
+        }
+    }
+}
+
+// Fungsi untuk benar-benar menghapus user berdasarkan username
+void delete_user_by_username(hash_table *ht, const char *username)
+{
+    int idx = hash_function(username);
+    User *cur = ht->table[idx];
+    User *prev = NULL;
+
+    while (cur)
+    {
+        if (strcmp(cur->username, username) == 0)
+        {
+            if (prev == NULL)
+            {
+                ht->table[idx] = cur->next;
+            }
+            else
+            {
+                prev->next = cur->next;
+            }
+            free(cur);
+            printf("User '%s' has been deleted.\n", username);
+            return;
+        }
+        prev = cur;
+        cur = cur->next;
+    }
+    printf("User '%s' not found.\n", username);
+}
+
+// Fungsi wrapper untuk digunakan di menu admin
+void delete_user(hash_table *ht)
+{
+    char username[20];
+
+    printf("Input a user's ID to delete: ");
+    scanf("%19s", username);
+    while (getchar() != '\n')
+        ; // Clear input
+
+    if (strcmp(username, "admin") == 0)
+    {
+        printf("Cannot delete default admin.\n");
+    }
+    else
+    {
+        delete_user_by_username(ht, username);
+    }
+    pause_console();
+}
+
+// Admin menu
+void admin_menu(hash_table *ht)
+{
     int choice;
-    do{
+    do
+    {
         system("cls");
         puts("=== ADMIN MENU ===");
         puts("1. View Users");
         puts("2. Something Else");
+        puts("3. Delete a User");
         puts("0. Logout");
         printf("Choice: ");
-        if (scanf("%d", &choice) != 1){
-            while (getchar() != '\n');
+        if (scanf("%d", &choice) != 1)
+        {
+            while (getchar() != '\n')
+                ;
             choice = -1;
         }
-        getchar(); // consume newline
-        
-        switch (choice){
+        else
+        {
+            while (getchar() != '\n')
+                ; // Clear newline
+        }
+
+        switch (choice)
+        {
         case 1:
-            puts("[Here you'd list all users]");
+            view_all_users(ht);
             pause_console();
             break;
         case 2:
             puts("[Other admin action]");
             pause_console();
             break;
+        case 3:
+            delete_user(ht);
+            break;
         }
     } while (choice != 0);
 }
 
-// stub client menu
-void client_menu(void){
+// Client menu placeholder
+void client_menu(void)
+{
     pause_console(); // just a placeholder
 }
 
-void login(hash_table *ht){
+void login(hash_table *ht)
+{
     char username[20], password[20];
 
     printf("Username: ");
     scanf("%19s", username);
-    getchar(); 
+    getchar();
 
     printf("Password: ");
     scanf("%19s", password);
     getchar();
 
     User *u = find_user(ht, username);
-    if (u && strcmp(u->password, password) == 0){
-        if (u->role == 1){
+    if (u && strcmp(u->password, password) == 0)
+    {
+        if (u->role == 1)
+        {
             printf("Login successful as ADMIN.\n");
             pause_console();
-            admin_menu();
+            admin_menu(ht);
         }
-        else{
+        else
+        {
             printf("Login successful as CLIENT.\n");
             pause_console();
             client_menu();
         }
     }
-    else{
+    else
+    {
         puts("Invalid username or password.");
         pause_console();
     }
 }
 
-void register_client(hash_table *ht){
+void register_client(hash_table *ht)
+{
     char username[20], password[20];
 
     puts("=== Client Registration ===");
@@ -130,7 +224,8 @@ void register_client(hash_table *ht){
     scanf("%19s", username);
     getchar();
 
-    if (find_user(ht, username)){
+    if (find_user(ht, username))
+    {
         puts("Username already exists.");
         pause_console();
         return;
@@ -145,25 +240,30 @@ void register_client(hash_table *ht){
     pause_console();
 }
 
-int main(){
+int main()
+{
     hash_table ht = {0};
-    insert_user(&ht, "admin", "admin123", 1);
+    insert_user(&ht, "admin", "admin123", 1); // default admin
 
     int choice;
-    do{
+    do
+    {
         system("cls");
         puts("=== Clinic System ===");
         puts("1. Register (Client)");
         puts("2. Login");
         puts("0. Exit");
         printf("Choose: ");
-        if (scanf("%d", &choice) != 1){
-            while (getchar() != '\n');
+        if (scanf("%d", &choice) != 1)
+        {
+            while (getchar() != '\n')
+                ;
             choice = -1;
         }
         getchar(); // consume newline
 
-        switch (choice){
+        switch (choice)
+        {
         case 1:
             register_client(&ht);
             break;
