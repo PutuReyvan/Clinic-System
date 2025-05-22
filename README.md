@@ -6,12 +6,13 @@ Final Project for Sem 2 applying Data Structures on program
 
 ### Client Side 
 - Create/Change Schedule
-- Create Reservation
 - See History
 - Payment
 - Rate Doctor
+- Cancel Appointment
+- View Doctor List (basically, doctor's profile)
 
 ### Admin Side
 - Manage Schedule
 - Create Report
-- Manage Medicine stock
+- Doctor's Rating Summary
