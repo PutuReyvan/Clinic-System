@@ -1,0 +1,1 @@
+    u->reservations = res;
