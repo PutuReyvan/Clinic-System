@@ -20,16 +20,16 @@ typedef struct reservation_node {
 typedef struct user {
     char username[20];
     char password[20];
-    int role; // 0 = client, 1 = admin
+    int role; // 0 = client, 1 = admin, 2 = doctor
     int available; // 0 = not available, 1 = available
-    struct reservation_node *reservations;
+    ReservationNode *reservations_front;  // queue front
+    ReservationNode *reservations_rear;   // queue rear
     struct user *next;
 } User;
 
 typedef struct {
     User *table[TABLE_SIZE];
 } hash_table;
-
 
 int hash_function(const char *username) {
     int hash = 0;
@@ -42,22 +42,20 @@ int hash_function(const char *username) {
 void insert_user(hash_table *ht, const char *username, const char *password, int role) {
     int idx = hash_function(username);
     User *u = (User *)malloc(sizeof(User));
-
     if (!u) {
         puts("Memory allocation failed");
         return;
     }
-
     strncpy(u->username, username, sizeof(u->username) - 1);
     u->username[sizeof(u->username) - 1] = '\0';
     strncpy(u->password, password, sizeof(u->password) - 1);
     u->password[sizeof(u->password) - 1] = '\0';
-
     u->role = role;
-    u->reservations = NULL;
+    u->available = (role == ROLE_DOCTOR) ? 1 : 0;
+    u->reservations_front = NULL;
+    u->reservations_rear = NULL;
     u->next = ht->table[idx];
     ht->table[idx] = u;
-    u->available = (role == ROLE_DOCTOR) ? 1 : 0;
 }
 
 User *find_user(hash_table *ht, const char *username) {
@@ -68,20 +66,20 @@ User *find_user(hash_table *ht, const char *username) {
     return NULL;
 }
 
-
 void pause_console(void) {
     printf("Press any key to continue...");
     _getch();
     printf("\n");
 }
 
-
 void view_all_users(hash_table *ht) {
     puts("=== List of Users ===");
     for (int i = 0; i < TABLE_SIZE; i++) {
         User *cur = ht->table[i];
         while (cur) {
-            printf("Username: %s | Role: %s\n", cur->username, cur->role == 1 ? "Admin" : "Client");
+            const char *role_str = (cur->role == ROLE_ADMIN) ? "Admin" :
+                                   (cur->role == ROLE_DOCTOR) ? "Doctor" : "Client";
+            printf("Username: %s | Role: %s\n", cur->username, role_str);
             cur = cur->next;
         }
     }
@@ -99,8 +97,8 @@ void delete_user(hash_table *ht, const char *username) {
             } else {
                 prev->next = cur->next;
             }
-            
-            ReservationNode *res = cur->reservations;
+            // Free all reservations
+            ReservationNode *res = cur->reservations_front;
             while (res) {
                 ReservationNode *next = res->next;
                 free(res);
@@ -147,16 +145,23 @@ void admin_menu(hash_table *ht) {
                 pause_console();
                 break;
             }
+            case 3:
+                puts("Generate Report feature not implemented yet.");
+                pause_console();
+                break;
+            case 4:
+                puts("Rating Summary feature not implemented yet.");
+                pause_console();
+                break;
         }
     } while (choice != 0);
 }
 
 // === CLIENT ===
-void create_reservation(User *u, hash_table *ht)
-{
+
+void create_reservation(User *u, hash_table *ht) {
     ReservationNode *res = (ReservationNode *)malloc(sizeof(ReservationNode));
-    if (!res)
-    {
+    if (!res) {
         puts("Memory allocation failed.");
         return;
     }
@@ -165,14 +170,12 @@ void create_reservation(User *u, hash_table *ht)
     scanf(" %[^\n]", res->doctor);
 
     User *doctor = find_user(ht, res->doctor);
-    if (!doctor || doctor->role != ROLE_DOCTOR)
-    {
+    if (!doctor || doctor->role != ROLE_DOCTOR) {
         puts("Doctor not found.");
         free(res);
         return;
     }
-    if (!doctor->available)
-    {
+    if (!doctor->available) {
         puts("Doctor is currently unavailable.");
         free(res);
         return;
@@ -189,15 +192,20 @@ void create_reservation(User *u, hash_table *ht)
     printf("Enter notes: ");
     scanf(" %[^\n]", res->notes);
 
-    res->next = u->reservations;
-    u->reservations = res;
+    res->next = NULL;
+    if (u->reservations_rear == NULL) {
+        u->reservations_front = u->reservations_rear = res;
+    } else {
+        u->reservations_rear->next = res;
+        u->reservations_rear = res;
+    }
 
     puts("Reservation created successfully!");
 }
 
 void view_reservation(User *u) {
     puts("=== Your Reservations ===");
-    ReservationNode *res = u->reservations;
+    ReservationNode *res = u->reservations_front;
     if (!res) {
         puts("No reservations found.");
         return;
@@ -214,8 +222,74 @@ void view_reservation(User *u) {
     }
 }
 
-void client_menu(User *u, hash_table *ht)
-{
+void cancel_reservation(User *u) {
+    if (u->reservations_front == NULL) {
+        puts("No reservations to cancel.");
+        return;
+    }
+
+    puts("=== Your Reservations ===");
+    ReservationNode *res = u->reservations_front;
+    int i = 1;
+    while (res) {
+        printf("%d. Date: %s, Time: %s, Doctor: %s, Notes: %s\n",
+               i, res->date, res->time, res->doctor, res->notes);
+        res = res->next;
+        i++;
+    }
+
+    int choice;
+    printf("\nMasukkan Nomor Reservasi yang akan di cancel (0 untuk kembali): ");
+    if (scanf("%d", &choice) != 1) {
+        while (getchar() != '\n');
+        puts("Invalid input.");
+        return;
+    }
+    getchar();
+
+    if (choice == 0) {
+        puts("Cancellation aborted.");
+        return;
+    }
+
+    if (choice < 1) {
+        puts("Invalid choice.");
+        return;
+    }
+
+    ReservationNode *current = u->reservations_front;
+    ReservationNode *prev = NULL;
+    int count = 1;
+
+    while (current && count < choice) {
+        prev = current;
+        current = current->next;
+        count++;
+    }
+
+    if (!current) {
+        puts("Reservation not found.");
+        return;
+    }
+
+    // Remove current node
+    if (prev == NULL) { // hapus node depan
+        u->reservations_front = current->next;
+        if (u->reservations_front == NULL) {
+            u->reservations_rear = NULL;
+        }
+    } else {
+        prev->next = current->next;
+        if (current == u->reservations_rear) {
+            u->reservations_rear = prev;
+        }
+    }
+
+    free(current);
+    puts("Reservation canceled successfully.");
+}
+
+void client_menu(User *u, hash_table *ht) {
     int choice;
     do {
         system("cls");
@@ -243,25 +317,28 @@ void client_menu(User *u, hash_table *ht)
                 view_reservation(u);
                 pause_console();
                 break;
+            case 3:
+                cancel_reservation(u);
+                pause_console();
+                break;
+            default:
+                puts("Feature not implemented or invalid choice.");
+                pause_console();
         }
     } while (choice != 0);
 }
+
 // Bagian dokter
 
 // Untuk liat list appointment Dokter A
-void view_doctor_appointments(hash_table *ht, const char *doctor_name)
-{
+void view_doctor_appointments(hash_table *ht, const char *doctor_name) {
     puts("=== Doctor's Appointments ===");
-    for (int i = 0; i < TABLE_SIZE; i++)
-    {
+    for (int i = 0; i < TABLE_SIZE; i++) {
         User *u = ht->table[i];
-        while (u)
-        {
-            ReservationNode *res = u->reservations;
-            while (res)
-            {
-                if (strcmp(res->doctor, doctor_name) == 0)
-                {
+        while (u) {
+            ReservationNode *res = u->reservations_front;
+            while (res) {
+                if (strcmp(res->doctor, doctor_name) == 0) {
                     printf("Patient: %s\nDate: %s\nTime: %s\nNotes: %s\n\n",
                            u->username, res->date, res->time, res->notes);
                 }
@@ -271,46 +348,42 @@ void view_doctor_appointments(hash_table *ht, const char *doctor_name)
         }
     }
 }
+
 // Untuk set dokter available ato engga
-void toggle_availability(User *u)
-{
+void toggle_availability(User *u) {
     u->available = !u->available;
     puts(u->available ? "You are now available." : "You are now unavailable.");
 }
 
 // Dokter Menu
-void doctor_menu(User *u, hash_table *ht)
-{
+void doctor_menu(User *u, hash_table *ht) {
     int choice;
-    do
-    {
+    do {
         system("cls");
         printf("=== DOCTOR MENU (User: %s) ===\n", u->username);
         puts("1. View My Appointments");
         puts("2. Toggle Availability");
         puts("0. Logout");
         printf("Choice: ");
-        if (scanf("%d", &choice) != 1)
-        {
-            while (getchar() != '\n')
-                ;
+        if (scanf("%d", &choice) != 1) {
+            while (getchar() != '\n');
             choice = -1;
         }
         getchar();
 
-        switch (choice)
-        {
-        case 1:
-            view_doctor_appointments(ht, u->username);
-            pause_console();
-            break;
-        case 2:
-            toggle_availability(u);
-            pause_console();
-            break;
+        switch (choice) {
+            case 1:
+                view_doctor_appointments(ht, u->username);
+                pause_console();
+                break;
+            case 2:
+                toggle_availability(u);
+                pause_console();
+                break;
         }
     } while (choice != 0);
 }
+
 // === AUTH ===
 void login(hash_table *ht) {
     char username[20], password[20];
@@ -325,20 +398,15 @@ void login(hash_table *ht) {
 
     User *u = find_user(ht, username);
     if (u && strcmp(u->password, password) == 0) {
-        if (u->role == ROLE_ADMIN)
-        {
+        if (u->role == ROLE_ADMIN) {
             puts("Login successful as ADMIN.");
             pause_console();
             admin_menu(ht);
-        }
-        else if (u->role == ROLE_DOCTOR)
-        {
+        } else if (u->role == ROLE_DOCTOR) {
             puts("Login successful as DOCTOR.");
             pause_console();
-            doctor_menu(u, ht); // Implement doctor menu if needed
-        }
-        else
-        {
+            doctor_menu(u, ht);
+        } else {
             puts("Login successful as CLIENT.");
             pause_console();
             client_menu(u, ht);
@@ -367,7 +435,7 @@ void register_client(hash_table *ht) {
     scanf("%19s", password);
     getchar();
 
-    insert_user(ht, username, password, 0);
+    insert_user(ht, username, password, ROLE_CLIENT);
     puts("Registration successful!");
     pause_console();
 }
@@ -375,8 +443,8 @@ void register_client(hash_table *ht) {
 // === MAIN ===
 int main() {
     hash_table ht = { 0 };
-    insert_user(&ht, "admin", "admin123", 1); // default admin
-    insert_user(&ht, "DokterDOom", "kamartaj", 2); // default doctor
+    insert_user(&ht, "admin", "admin123", ROLE_ADMIN);      // default admin
+    insert_user(&ht, "DokterDOom", "kamartaj", ROLE_DOCTOR); // default doctor
 
     int choice;
     do {
