@@ -11,36 +11,54 @@
 #define ROLE_ADMIN 1
 #define ROLE_DOCTOR 2
 #define ALPHABET_SIZE 26
+// ======================= [DATA STRUCTURES] =======================
+#define MAX_HEAP 1000
 
 // Node untuk menyimpan data reservasi
 //  yang akan disimpan dalam queue
 
-typedef struct reservation_node {
+typedef struct reservation_node
+{
     char date[20];
     char time[10];
     char doctor[50];
     char notes[100];
     struct reservation_node *next;
+    char patient_username[20];
 } ReservationNode;
 
 // Struktur untuk menyimpan data user
 // yang akan disimpan dalam hash table
 // dengan chaining untuk mengatasi collision (linked list)
-typedef struct user {
+typedef struct user
+{
     char username[20];
     char password[20];
-    int role; // 0 = client, 1 = admin, 2 = doctor
+    int role;      // 0 = client, 1 = admin, 2 = doctor
     int available; // 0 = not available, 1 = available
     int total_rating;
     int rating_count;
-    ReservationNode *reservations_front;  // queue front
-    ReservationNode *reservations_rear;   // queue rear
+    ReservationNode *reservations_front; // queue front
+    ReservationNode *reservations_rear;  // queue rear
     struct user *next;
 } User;
 
-typedef struct {
+typedef struct
+{
     User *table[TABLE_SIZE];
 } hash_table;
+
+// Struct untuk heap
+typedef struct heap_node
+{
+    ReservationNode *res; // Pointer to reservation node
+} HeapNode;
+
+typedef struct ReservationHeap
+{
+    HeapNode *data[MAX_HEAP];
+    int size;
+} ReservationHeap;
 
 // Struct untuk Tries
 typedef struct trie_node
@@ -50,16 +68,96 @@ typedef struct trie_node
     char username[20];  //
 } TrieNode;
 
+typedef struct avl_node
+{
+    struct avl_node *left;
+    struct avl_node *right;
+    int height;
+    ReservationNode *res; // Pointer to reservation node
+} AVLNode;
+
 TrieNode *trie_root = NULL;
 
+// ======================= [UTILITY FUNCTIONS] =======================
 // Fungsi untuk membuat hash dari username
 // Menggunakan metode hash sederhana dengan perkalian
-int hash_function(const char *username) {
+int hash_function(const char *username)
+{
     int hash = 0;
-    for (int i = 0; username[i]; i++) {
+    for (int i = 0; username[i]; i++)
+    {
         hash = (hash * 31 + username[i]) % TABLE_SIZE;
     }
     return hash;
+}
+
+void swap_heap_nodes(HeapNode **a, HeapNode **b)
+{
+    HeapNode *temp = *a;
+    *a = *b;
+    *b = temp;
+}
+
+int compare_reservations(ReservationNode *a, ReservationNode *b)
+{
+    int cmp = strcmp(a->date, b->date);
+    if (cmp == 0)
+        cmp = strcmp(a->time, b->time);
+    return cmp;
+}
+
+void heapify_up(ReservationHeap *heap, int idx)
+{
+    if (idx == 0)
+        return;
+    int parent = (idx - 1) / 2;
+    if (compare_reservations(heap->data[idx]->res, heap->data[parent]->res) < 0)
+    {
+        swap_heap_nodes(&heap->data[idx], &heap->data[parent]);
+        heapify_up(heap, parent);
+    }
+}
+
+void heapify_down(ReservationHeap *heap, int idx)
+{
+    int smallest = idx;
+    int left = 2 * idx + 1;
+    int right = 2 * idx + 2;
+
+    if (left < heap->size &&
+        compare_reservations(heap->data[left]->res, heap->data[smallest]->res) < 0)
+        smallest = left;
+
+    if (right < heap->size &&
+        compare_reservations(heap->data[right]->res, heap->data[smallest]->res) < 0)
+        smallest = right;
+
+    if (smallest != idx)
+    {
+        swap_heap_nodes(&heap->data[idx], &heap->data[smallest]);
+        heapify_down(heap, smallest);
+    }
+}
+
+void insert_heap(ReservationHeap *heap, ReservationNode *res)
+{
+    if (heap->size >= MAX_HEAP)
+        return;
+    HeapNode *node = (HeapNode *)malloc(sizeof(HeapNode));
+    node->res = res;
+    heap->data[heap->size] = node;
+    heapify_up(heap, heap->size);
+    heap->size++;
+}
+
+HeapNode *extract_min(ReservationHeap *heap)
+{
+    if (heap->size == 0)
+        return NULL;
+    HeapNode *min = heap->data[0];
+    heap->data[0] = heap->data[--heap->size];
+    heapify_down(heap, 0);
+    return min;
 }
 
 TrieNode *create_trie_node()
@@ -100,11 +198,13 @@ void insert_trie(TrieNode *root, const char *username)
 // dengan chaining untuk mengatasi collision
 // Jika username sudah ada, tidak akan ditambahkan
 // dan akan menampilkan pesan error
-void insert_user(hash_table *ht, const char *username, const char *password, int role) {
+void insert_user(hash_table *ht, const char *username, const char *password, int role)
+{
     int idx = hash_function(username);
     User *u = (User *)malloc(sizeof(User));
 
-    if (!u) {
+    if (!u)
+    {
         puts("Memory allocation failed");
         return;
     }
@@ -126,30 +226,239 @@ void insert_user(hash_table *ht, const char *username, const char *password, int
 }
 
 // Function untuk mencari user berdasarkan username
-User *find_user(hash_table *ht, const char *username) {
+User *find_user(hash_table *ht, const char *username)
+{
     int idx = hash_function(username);
-    for (User *cur = ht->table[idx]; cur; cur = cur->next) {
-        if (strcmp(cur->username, username) == 0) return cur;
+    for (User *cur = ht->table[idx]; cur; cur = cur->next)
+    {
+        if (strcmp(cur->username, username) == 0)
+            return cur;
     }
     return NULL;
 }
 
+void save_reservations_to_csv(hash_table *ht, const char *filename)
+{
+    FILE *file = fopen(filename, "w"); // overwrite
+    if (!file)
+    {
+        puts("Failed to open file to save reservations.");
+        return;
+    }
+
+    fprintf(file, "username,date,time,doctor,notes\n"); // CSV header
+
+    for (int i = 0; i < TABLE_SIZE; i++)
+    {
+        User *u = ht->table[i];
+        while (u)
+        {
+            ReservationNode *res = u->reservations_front;
+            while (res)
+            {
+                fprintf(file, "%s,%s,%s,%s,%s\n",
+                        u->username,
+                        res->date,
+                        res->time,
+                        res->doctor,
+                        res->notes);
+                res = res->next;
+            }
+            u = u->next;
+        }
+    }
+
+    fclose(file);
+    puts("Reservations saved to file successfully.");
+}
+
+void load_reservations_from_csv(hash_table *ht, const char *filename)
+{
+    FILE *file = fopen(filename, "r");
+    if (!file)
+    {
+        puts("No existing reservation data found.");
+        return;
+    }
+
+    char line[300];
+    fgets(line, sizeof(line), file); // skip header
+
+    while (fgets(line, sizeof(line), file))
+    {
+        char username[20], date[20], time[10], doctor[50], notes[100];
+        if (sscanf(line, "%19[^,],%19[^,],%9[^,],%49[^,],%99[^\n]",
+                   username, date, time, doctor, notes) == 5)
+        {
+
+            User *u = find_user(ht, username);
+            if (!u)
+                continue; // skip if user not found
+
+            ReservationNode *res = (ReservationNode *)malloc(sizeof(ReservationNode));
+            if (!res)
+                continue;
+
+            strcpy(res->patient_username, username);
+            strcpy(res->date, date);
+            strcpy(res->time, time);
+            strcpy(res->doctor, doctor);
+            strcpy(res->notes, notes);
+            res->next = NULL;
+
+            if (u->reservations_rear == NULL)
+            {
+                u->reservations_front = u->reservations_rear = res;
+            }
+            else
+            {
+                u->reservations_rear->next = res;
+                u->reservations_rear = res;
+            }
+        }
+    }
+
+    fclose(file);
+    puts("Reservations loaded from file.");
+}
+
+// Fungsi untuk AVL
+
+int height(AVLNode *node)
+{
+    return node ? node->height : 0;
+}
+
+int max(int a, int b)
+{
+    return (a > b) ? a : b;
+}
+
+int get_balance(AVLNode *node)
+{
+    if (!node)
+        return 0;
+    return height(node->left) - height(node->right);
+}
+
+// Rotation
+AVLNode *right_rotate(AVLNode *y)
+{
+    AVLNode *x = y->left;
+    AVLNode *T2 = x->right;
+
+    x->right = y;
+    y->left = T2;
+
+    y->height = max(height(y->left), height(y->right)) + 1;
+    x->height = max(height(x->left), height(x->right)) + 1;
+
+    return x;
+}
+
+AVLNode *left_rotate(AVLNode *x)
+{
+    AVLNode *y = x->right;
+    AVLNode *T2 = y->left;
+
+    y->left = x;
+    x->right = T2;
+
+    x->height = max(height(x->left), height(x->right)) + 1;
+    y->height = max(height(y->left), height(y->right)) + 1;
+
+    return y;
+}
+
+int compare_date(const char *d1, const char *d2)
+{
+    return strcmp(d1, d2); // since format is YYYY-MM-DD, lexicographic comparison works!
+}
+
+AVLNode *insert_avl(AVLNode *node, ReservationNode *res)
+{
+    if (!node)
+    {
+        AVLNode *new_node = (AVLNode *)malloc(sizeof(AVLNode));
+        new_node->res = res;
+        new_node->left = new_node->right = NULL;
+        new_node->height = 1;
+        return new_node;
+    }
+
+    int cmp = compare_date(res->date, node->res->date);
+
+    if (cmp == 0)
+        cmp = strcmp(res->time, node->res->time);
+    if (cmp == 0)
+        cmp = strcmp(res->doctor, node->res->doctor);
+    if (cmp < 0)
+        node->left = insert_avl(node->left, res);
+    else if (cmp > 0)
+        node->right = insert_avl(node->right, res);
+    else
+        return node; // duplicate date (optional)
+
+    node->height = 1 + max(height(node->left), height(node->right));
+    int balance = get_balance(node);
+
+    if (balance > 1 && compare_date(res->date, node->left->res->date) < 0)
+        return right_rotate(node);
+    if (balance < -1 && compare_date(res->date, node->right->res->date) > 0)
+        return left_rotate(node);
+    if (balance > 1 && compare_date(res->date, node->left->res->date) > 0)
+    {
+        node->left = left_rotate(node->left);
+        return right_rotate(node);
+    }
+    if (balance < -1 && compare_date(res->date, node->right->res->date) < 0)
+    {
+        node->right = right_rotate(node->right);
+        return left_rotate(node);
+    }
+
+    return node;
+}
+
+void inorder_traversal_avl(AVLNode *node, int is_doctor_view)
+{
+    if (!node)
+        return;
+
+    inorder_traversal_avl(node->left, is_doctor_view);
+
+    ReservationNode *res = node->res;
+    if (is_doctor_view)
+    {
+        printf("Patient: %s\n", res->patient_username);
+    }
+
+    printf("Date: %s\nTime: %s\nDoctor: %s\nNotes: %s\n\n",
+           res->date, res->time, res->doctor, res->notes);
+
+    inorder_traversal_avl(node->right, is_doctor_view);
+}
+
 // Pause console untuk menunggu input dari user
-void pause_console(void) {
+void pause_console(void)
+{
     printf("Press any key to continue...");
     _getch();
     printf("\n");
 }
 
-// ==================================== ADMIN ===========================
+// ======================= [ADMIN FUNCTIONS] =======================
 
 // Fungsi untuk menampilkan semua user
 // yang ada di hash table
-void view_all_users(hash_table *ht) {
+void view_all_users(hash_table *ht)
+{
     puts("=== List of Users ===");
-    for (int i = 0; i < TABLE_SIZE; i++) {
+    for (int i = 0; i < TABLE_SIZE; i++)
+    {
         User *cur = ht->table[i];
-        while (cur) {
+        while (cur)
+        {
             const char *role_str = (cur->role == ROLE_ADMIN) ? "Admin" : (cur->role == ROLE_DOCTOR) ? "Doctor"
                                                                                                     : "Client";
             printf("Username: %s | Role: %s\n", cur->username, role_str);
@@ -161,21 +470,28 @@ void view_all_users(hash_table *ht) {
 // Fungsi untuk menghapus user berdasarkan username
 // Jika user ditemukan, akan menghapus user dan semua reservasi yang dimilikinya
 // Jika tidak ditemukan, akan menampilkan pesan error
-void delete_user(hash_table *ht, const char *username) {
+void delete_user(hash_table *ht, const char *username)
+{
     int idx = hash_function(username);
     User *cur = ht->table[idx];
     User *prev = NULL;
 
-    while (cur) {
-        if (strcmp(cur->username, username) == 0) {
-            if (prev == NULL) {
+    while (cur)
+    {
+        if (strcmp(cur->username, username) == 0)
+        {
+            if (prev == NULL)
+            {
                 ht->table[idx] = cur->next;
-            } else {
+            }
+            else
+            {
                 prev->next = cur->next;
             }
             // Free all reservations
             ReservationNode *res = cur->reservations_front;
-            while (res) {
+            while (res)
+            {
                 ReservationNode *next = res->next;
                 free(res);
                 res = next;
@@ -188,6 +504,47 @@ void delete_user(hash_table *ht, const char *username) {
         cur = cur->next;
     }
     printf("User '%s' not found.\n", username);
+}
+
+void generate_report_with_heap(hash_table *ht)
+{
+    ReservationHeap heap;
+    heap.size = 0;
+
+    // Collect all reservations
+    for (int i = 0; i < TABLE_SIZE; i++)
+    {
+        User *u = ht->table[i];
+        while (u)
+        {
+            ReservationNode *res = u->reservations_front;
+            while (res)
+            {
+                insert_heap(&heap, res);
+                res = res->next;
+            }
+            u = u->next;
+        }
+    }
+
+    if (heap.size == 0)
+    {
+        puts("No reservations to report.");
+        return;
+    }
+
+    puts("=== Upcoming Appointments Report ===");
+    while (heap.size > 0)
+    {
+        HeapNode *node = extract_min(&heap);
+        printf("Date: %s | Time: %s | Doctor: %s | Patient: %s | Notes: %s\n",
+               node->res->date,
+               node->res->time,
+               node->res->doctor,
+               node->res->patient_username,
+               node->res->notes);
+        free(node);
+    }
 }
 
 void to_lowercase(char *str)
@@ -273,9 +630,11 @@ void search_rating_by_prefix(TrieNode *root, hash_table *ht, const char *prefix)
 }
 
 // Fungsi untuk menampilkan menu admin
-void admin_menu(hash_table *ht) {
+void admin_menu(hash_table *ht)
+{
     int choice;
-    do {
+    do
+    {
         system("cls");
         puts("=== ADMIN MENU ===");
         puts("1. View Users");
@@ -284,42 +643,46 @@ void admin_menu(hash_table *ht) {
         puts("4. Rating Summary");
         puts("0. Logout");
         printf("Choice: ");
-        if (scanf("%d", &choice) != 1) {
-            while (getchar() != '\n');
+        if (scanf("%d", &choice) != 1)
+        {
+            while (getchar() != '\n')
+                ;
             choice = -1;
         }
         getchar();
 
-        switch (choice) {
-            case 1:
-                view_all_users(ht);
-                pause_console();
-                break;
-            case 2: {
-                char uname[20];
-                printf("Enter username to delete: ");
-                scanf("%19s", uname);
-                getchar();
-                delete_user(ht, uname);
-                pause_console();
-                break;
-            }
-            case 3:
-                puts("Generate Report feature not implemented yet.");
-                pause_console();
-                break;
-            case 4:
-                char prefix[20];
-                printf("Enter doctor name prefix: ");
-                scanf("%19s", prefix);
-                search_rating_by_prefix(trie_root, ht, prefix);
-                pause_console();
-                break;
+        switch (choice)
+        {
+        case 1:
+            view_all_users(ht);
+            pause_console();
+            break;
+        case 2:
+        {
+            char uname[20];
+            printf("Enter username to delete: ");
+            scanf("%19s", uname);
+            getchar();
+            delete_user(ht, uname);
+            pause_console();
+            break;
+        }
+        case 3:
+            generate_report_with_heap(ht);
+            pause_console();
+            break;
+        case 4:
+            char prefix[20];
+            printf("Enter doctor name prefix: ");
+            scanf("%19s", prefix);
+            search_rating_by_prefix(trie_root, ht, prefix);
+            pause_console();
+            break;
         }
     } while (choice != 0);
 }
 
-// ========================= CLIENT==============================
+// ======================= [CLIENT FUNCTIONS] =======================
 
 // Fungsi untuk membuat reservasi
 // User akan memasukkan nama dokter, tanggal, waktu, dan catatan
@@ -342,10 +705,12 @@ void view_doctors_list(hash_table *ht)
     }
 }
 
-void create_reservation(User *u, hash_table *ht) {
+void create_reservation(User *u, hash_table *ht)
+{
     view_doctors_list(ht);
     ReservationNode *res = (ReservationNode *)malloc(sizeof(ReservationNode));
-    if (!res) {
+    if (!res)
+    {
         puts("Memory allocation failed.");
         return;
     }
@@ -356,12 +721,14 @@ void create_reservation(User *u, hash_table *ht) {
     scanf(" %[^\n]", res->doctor);
 
     User *doctor = find_user(ht, res->doctor);
-    if (!doctor || doctor->role != ROLE_DOCTOR) {
+    if (!doctor || doctor->role != ROLE_DOCTOR)
+    {
         puts("Doctor not found.");
         free(res);
         return;
     }
-    if (!doctor->available) {
+    if (!doctor->available)
+    {
         puts("Doctor is currently unavailable.");
         free(res);
         return;
@@ -379,41 +746,50 @@ void create_reservation(User *u, hash_table *ht) {
     scanf(" %[^\n]", res->notes);
 
     res->next = NULL;
-    if (u->reservations_rear == NULL) {
+    strcpy(res->patient_username, u->username);
+    if (u->reservations_rear == NULL)
+    {
         u->reservations_front = u->reservations_rear = res;
-    } else {
+    }
+    else
+    {
         u->reservations_rear->next = res;
         u->reservations_rear = res;
     }
+    save_reservations_to_csv(ht, "reservations.csv");
     puts("Reservation created successfully!");
 }
 
 // Fungsi untuk menampilkan semua reservasi
 // yang dimiliki oleh user
-void view_reservation(User *u) {
-    puts("=== Your Reservations ===");
-    ReservationNode *res = u->reservations_front;
-    if (!res) {
+void view_reservation(User *u)
+{
+    AVLNode *root = NULL;
+    ReservationNode *cur = u->reservations_front;
+
+    while (cur)
+    {
+        root = insert_avl(root, cur);
+        cur = cur->next;
+    }
+
+    if (!root)
+    {
         puts("No reservations found.");
         return;
     }
 
-    int i = 1;
-    while (res) {
-        printf("Reservation #%d:\n", i++);
-        printf("Date   : %s\n", res->date);
-        printf("Time   : %s\n", res->time);
-        printf("Doctor : %s\n", res->doctor);
-        printf("Notes  : %s\n\n", res->notes);
-        res = res->next;
-    }
+    puts("=== Your Reservations (Sorted by Date) ===");
+    inorder_traversal_avl(root, 0);
 }
 
 // Fungsi untuk membatalkan reservasi
 //  User akan memilih nomor reservasi yang ingin dibatalkan
 //  Jika nomor tidak valid, akan menampilkan pesan error
-void cancel_reservation(User *u) {
-    if (u->reservations_front == NULL) {
+void cancel_reservation(User *u)
+{
+    if (u->reservations_front == NULL)
+    {
         puts("No reservations to cancel.");
         return;
     }
@@ -421,7 +797,8 @@ void cancel_reservation(User *u) {
     puts("=== Your Reservations ===");
     ReservationNode *res = u->reservations_front;
     int i = 1;
-    while (res) {
+    while (res)
+    {
         printf("%d. Date: %s, Time: %s, Doctor: %s, Notes: %s\n",
                i, res->date, res->time, res->doctor, res->notes);
         res = res->next;
@@ -665,12 +1042,13 @@ void client_menu(User *u, hash_table *ht)
     } while (choice != 0);
 }
 
-// ===============================Dokter=============================================
+// ======================= [DOCTOR FUNCTIONS] =======================
 
 // Untuk liat list appointment Dokter A
 void view_doctor_appointments(hash_table *ht, const char *doctor_name)
 {
-    puts("=== Doctor's Appointments ===");
+    AVLNode *root = NULL;
+
     for (int i = 0; i < TABLE_SIZE; i++)
     {
         User *u = ht->table[i];
@@ -681,52 +1059,67 @@ void view_doctor_appointments(hash_table *ht, const char *doctor_name)
             {
                 if (strcmp(res->doctor, doctor_name) == 0)
                 {
-                    printf("Patient: %s\nDate: %s\nTime: %s\nNotes: %s\n\n",
-                           u->username, res->date, res->time, res->notes);
+                    // Patient name is already filled when created
+                    root = insert_avl(root, res);
                 }
                 res = res->next;
             }
             u = u->next;
         }
     }
+
+    if (!root)
+    {
+        puts("No appointments found.");
+        return;
+    }
+
+    puts("=== Appointments (Sorted by Date) ===");
+    inorder_traversal_avl(root, 1);
 }
 
 // Untuk set dokter available ato engga
-void toggle_availability(User *u) {
+void toggle_availability(User *u)
+{
     u->available = !u->available;
     puts(u->available ? "You are now available." : "You are now unavailable.");
 }
 
 // Dokter Menu
-void doctor_menu(User *u, hash_table *ht) {
+void doctor_menu(User *u, hash_table *ht)
+{
     int choice;
-    do {
+    do
+    {
         system("cls");
         printf("=== DOCTOR MENU (User: %s) ===\n", u->username);
         puts("1. View My Appointments");
         puts("2. Toggle Availability");
         puts("0. Logout");
         printf("Choice: ");
-        if (scanf("%d", &choice) != 1) {
-            while (getchar() != '\n');
+        if (scanf("%d", &choice) != 1)
+        {
+            while (getchar() != '\n')
+                ;
             choice = -1;
         }
         getchar();
 
-        switch (choice) {
-            case 1:
-                view_doctor_appointments(ht, u->username);
-                pause_console();
-                break;
-            case 2:
-                toggle_availability(u);
-                pause_console();
-                break;
+        switch (choice)
+        {
+        case 1:
+            view_doctor_appointments(ht, u->username);
+            pause_console();
+            break;
+        case 2:
+            toggle_availability(u);
+            pause_console();
+            break;
         }
     } while (choice != 0);
 }
 
-// ========================== AUTH ============================
+// ======================= [AUTH FUNCTIONS] ========================
 
 // Fungsi untuk membaca data user dari file CSV
 void load_users_from_csv(hash_table *ht, const char *filename)
@@ -779,7 +1172,8 @@ void save_user_to_csv(const char *filename, const char *username, const char *pa
 }
 
 // Fungsi untuk login user
-void login(hash_table *ht) {
+void login(hash_table *ht)
+{
     char username[20], password[20];
 
     printf("Username: ");
@@ -791,28 +1185,37 @@ void login(hash_table *ht) {
     getchar();
 
     User *u = find_user(ht, username);
-    if (u && strcmp(u->password, password) == 0) {
-        if (u->role == ROLE_ADMIN) {
+    if (u && strcmp(u->password, password) == 0)
+    {
+        if (u->role == ROLE_ADMIN)
+        {
             puts("Login successful as ADMIN.");
             pause_console();
             admin_menu(ht);
-        } else if (u->role == ROLE_DOCTOR) {
+        }
+        else if (u->role == ROLE_DOCTOR)
+        {
             puts("Login successful as DOCTOR.");
             pause_console();
             doctor_menu(u, ht);
-        } else {
+        }
+        else
+        {
             puts("Login successful as CLIENT.");
             pause_console();
             client_menu(u, ht);
         }
-    } else {
+    }
+    else
+    {
         puts("Invalid username or password.");
         pause_console();
     }
 }
 
 // Fungsi untuk mendaftarkan user baru sebagai client
-void register_client(hash_table *ht) {
+void register_client(hash_table *ht)
+{
     char username[20], password[20];
 
     puts("=== Client Registration ===");
@@ -820,7 +1223,8 @@ void register_client(hash_table *ht) {
     scanf("%19s", username);
     getchar();
 
-    if (find_user(ht, username)) {
+    if (find_user(ht, username))
+    {
         puts("Username already exists.");
         pause_console();
         return;
@@ -837,47 +1241,53 @@ void register_client(hash_table *ht) {
     pause_console();
 }
 
-// ====================== MAIN ===========================
-int main() {
+// ======================= [MAIN FUNCTION] =======================
+int main()
+{
     hash_table ht = {0};
     trie_root = create_trie_node();
 
     load_users_from_csv(&ht, "users.csv");
+    load_reservations_from_csv(&ht, "reservations.csv");
+    load_ratings_from_csv(&ht, "ratings.csv");
 
     // Use wrapper to keep hash and Trie in sync
     insert_user_and_trie(&ht, trie_root, "admin", "admin123", ROLE_ADMIN);
-    insert_user_and_trie(&ht, trie_root, "drdoom", "kamartaj", ROLE_DOCTOR);
-    insert_user_and_trie(&ht, trie_root, "drstrange", "kamartaj", ROLE_DOCTOR);
-
-    load_ratings_from_csv(&ht, "ratings.csv");
+    insert_user_and_trie(&ht, trie_root, "drdoom", "dok123", ROLE_DOCTOR);
+    insert_user_and_trie(&ht, trie_root, "drstrange", "123dok", ROLE_DOCTOR);
+    insert_user_and_trie(&ht, trie_root, "alice", "1234", ROLE_CLIENT);
 
     int choice;
-    do {
+    do
+    {
         system("cls");
         puts("=== Clinic System ===");
         puts("1. Register (Client)");
         puts("2. Login");
         puts("0. Exit");
         printf("Choose: ");
-        if (scanf("%d", &choice) != 1) {
-            while (getchar() != '\n');
+        if (scanf("%d", &choice) != 1)
+        {
+            while (getchar() != '\n')
+                ;
             choice = -1;
         }
         getchar();
 
-        switch (choice) {
-            case 1:
-                register_client(&ht);
-                break;
-            case 2:
-                login(&ht);
-                break;
-            case 0:
-                puts("Goodbye!");
-                break;
-            default:
-                puts("Invalid choice.");
-                pause_console();
+        switch (choice)
+        {
+        case 1:
+            register_client(&ht);
+            break;
+        case 2:
+            login(&ht);
+            break;
+        case 0:
+            puts("Goodbye!");
+            break;
+        default:
+            puts("Invalid choice.");
+            pause_console();
         }
     } while (choice != 0);
 
