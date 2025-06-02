@@ -64,7 +64,6 @@ Sistem Reservasi Klinik berbasis C yang mendukung peran Admin, Dokter, dan Pengg
 
 ## 📌 Catatan Tambahan
 
-- Program menggunakan Bahasa Indonesia untuk seluruh antarmuka pengguna.
 - Semua data disimpan secara **persistent** menggunakan file `.csv`.
 - Mendukung konsol Windows (`conio.h`, `windows.h`). Untuk Linux, sesuaikan bagian `getch()`.
 
